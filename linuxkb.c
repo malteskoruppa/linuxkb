@@ -283,18 +283,6 @@ int text(lua_State *L) {
   // get text string from Lua
   const char *text = lua_tostring(L, -1);
 
-  // UTF8 not supported at at the moment!
-  if(text[0]<0) {
-#ifdef DEBUG
-    fprintf(stderr,"linuxkb: DEBUG: UTF8 char: ");
-    int j;
-    for( j = 0; text[j] != '\0'; j++)
-      fprintf(stderr,"%i,",text[j]);
-    fprintf(stderr,"\n");
-#endif
-    die("only ASCII chars are supported");
-  }
-
 #ifdef DEBUG
   fprintf(stderr,"linuxkb: DEBUG: text is %s\n",text);
   int textlen = lua_strlen(L, -1);
@@ -304,11 +292,49 @@ int text(lua_State *L) {
   // iterate over string and simulate typing
   int i;
   for( i = 0; text[i] != '\0'; i++) {
+    // for ASCII chars:
+    if(text[i] >= 0) {
 #ifdef DEBUG
-    fprintf(stderr,"linuxkb: DEBUG: text[%i] is %c, ASCII code %d\n",i,text[i],text[i]);
+      fprintf(stderr,"linuxkb: DEBUG: text[%i] is %c, ASCII code %d\n",i,text[i],text[i]);
 #endif
-    if(type_char(text[i])<0)
-      fprintf(stderr,"linuxkb: warning: could not type char\n");
+      if( type_char(text[i])<0)
+	fprintf(stderr,"linuxkb: warning: could not type char\n");
+    }
+
+    // the following block takes care of UTF8 chars (not supported yet, except for Euro symbol)
+    // mind: this code is very temporary and serves purely experimentation purposes.
+    // for actual deployment use a lib that allows true parsing of UTF8 strings, e.g., see
+    // http://userguide.icu-project.org/strings
+    // (install package libicu-dev in Ubuntu)
+    // TODO read up on how to use it :-)
+    else {
+#ifdef DEBUG
+      fprintf(stderr,"linuxkb: DEBUG: UTF8 char: ");
+#endif
+      int j;
+      for( j=i; text[j] < 0; j++) {
+#ifdef DEBUG
+	fprintf(stderr,"%x,",text[j]);
+#endif
+      }
+#ifdef DEBUG
+      fprintf(stderr,"\n");
+      fprintf(stderr, "linuxkb: DEBUG: length: %d\n", j-i);
+#endif
+      // if UTF8 code is 0xffffffe2 0xffffff82 0xffffffac, type a Euro symbol, otherwise don't type anything
+      if( j-i == 3 && text[i] == 0xffffffe2 && text[i+1] == 0xffffff82 && text[i+2] == 0xffffffac) {
+	// press ALTGR aka level 3 shift and '5'
+	if( uinput_event(EV_KEY,KEY_RIGHTALT,1)<0 ||
+	    type_key(KEY_5)<0 ||
+	    uinput_event(EV_KEY,KEY_RIGHTALT,0)<0 ||
+	    uinput_event(EV_SYN,0,0)<0)
+	  fprintf(stderr,"linuxkb: warning: could not type UTF8 char\n");
+      }
+      else
+	fprintf(stderr,"linuxkb: warning: only ASCII chars and the Euro symbol are supported!\n");
+      // set i to the last negative char, so that in next iteration we get next positive char
+      i = j-1;
+    }
   }
 
   return 0;
